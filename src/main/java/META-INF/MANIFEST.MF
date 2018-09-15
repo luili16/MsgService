@@ -1,0 +1,13 @@
+Manifest-Version: 1.0
+Class-Path: lib/log4j-1.2-api-2.11.1.jar lib/log4j-api-2.11.1.jar lib/
+ log4j-appserver-2.11.1.jar lib/log4j-cassandra-2.11.1.jar lib/log4j-c
+ ore-2.11.1-tests.jar lib/log4j-core-2.11.1.jar lib/log4j-couchdb-2.11
+ .1.jar lib/log4j-flume-ng-2.11.1.jar lib/log4j-iostreams-2.11.1.jar l
+ ib/log4j-jcl-2.11.1.jar lib/log4j-jdbc-dbcp2-2.11.1.jar lib/log4j-jmx
+ -gui-2.11.1.jar lib/log4j-jpa-2.11.1.jar lib/log4j-jul-2.11.1.jar lib
+ /log4j-liquibase-2.11.1.jar lib/log4j-mongodb2-2.11.1.jar lib/log4j-m
+ ongodb3-2.11.1.jar lib/log4j-slf4j-impl-2.11.1.jar lib/log4j-slf4j18-
+ impl-2.11.1.jar lib/log4j-taglib-2.11.1.jar lib/log4j-web-2.11.1.jar 
+ lib/netty-all-4.1.29.Final.jar
+Main-Class: com.llx278.msgservice.MsgServer
+
