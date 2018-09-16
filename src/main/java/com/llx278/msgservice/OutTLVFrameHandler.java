@@ -1,8 +1,10 @@
 package com.llx278.msgservice;
 
+import com.llx278.msgservice.protocol.Debug;
 import com.llx278.msgservice.protocol.TLV;
 import com.llx278.msgservice.protocol.Type;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
 import io.netty.channel.*;
 import io.netty.util.ReferenceCountUtil;
 import org.apache.logging.log4j.Level;
@@ -28,27 +30,22 @@ public class OutTLVFrameHandler extends ChannelOutboundHandlerAdapter {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-
-        sLogger.log(Level.DEBUG, "准备写 封装TLV帧 msg : " + msg.toString());
         ByteBuf buf = (ByteBuf) msg;
-        ByteBuf tlvBuf = TLV.composite(Type.FRAME_MSG, buf.readableBytes(), buf);
-        ctx.write(tlvBuf);
-        if (buf.refCnt() !=0) {
-            ReferenceCountUtil.release(buf, buf.refCnt());
-        }
-
+        ByteBuf dst = ctx.alloc().buffer();
+        TLV.compositeTlvFrame(Type.FRAME_MSG, buf, dst);
+        ctx.writeAndFlush(dst);
+        buf.release();
     }
 
     @Override
     public void flush(ChannelHandlerContext ctx) throws Exception {
         ctx.flush();
-        sLogger.log(Level.DEBUG,"flush 结束");
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         super.exceptionCaught(ctx, cause);
-        sLogger.log(Level.ERROR,cause);
+        sLogger.log(Level.ERROR, cause);
         Helper.removeClient(ctx);
         ctx.close();
     }

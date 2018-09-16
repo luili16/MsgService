@@ -1,47 +1,46 @@
 package com.llx278.msgservice;
 
-import com.llx278.msgservice.protocol.HeartBeatFrame;
+import com.llx278.msgservice.protocol.HeartBeatValue;
+import com.llx278.msgservice.protocol.TLV;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.Attribute;
-import io.netty.util.ReferenceCountUtil;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.Map;
 
-public class InHeartBeatHandler extends SimpleChannelInboundHandler<ByteBuf> {
+public class InHeartBeatHandler extends ChannelInboundHandlerAdapter {
 
     private static final Logger sLogger = LogManager.getLogger(InHeartBeatHandler.class);
 
     public static final String NAME = "InHeartBeatHandler";
-    private ByteBuf buf;
+
 
     @Override
-    protected void channelRead0(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
-        buf = msg;
-    }
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        ByteBuf buf = (ByteBuf) msg;
 
-    @Override
-    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-
-        if (!HeartBeatFrame.isHeartBeatFrame(buf)) {
-            buf = ReferenceCountUtil.retain(buf);
+        if (!TLV.isHeartBeatFrame(buf)) {
             ctx.fireChannelRead(buf);
             ctx.fireChannelReadComplete();
             return;
         }
-
         try {
-            // 心跳帧
-            HeartBeatFrame heartBeatFrame = HeartBeatFrame.valueOf(buf);
-            HeartBeatFrame.Value value = heartBeatFrame.getValue();
-            int uid = value.getUid();
 
+            // 心跳帧
+            TLV.readType(buf);
+            int len = TLV.readLength(buf);
+            int readableBytes = buf.readableBytes();
+            if (len != readableBytes) {
+                sLogger.log(Level.ERROR,"invalid heart beat frame expect length is " + len + " but actual is " + readableBytes);
+                return;
+            }
+            int uid = HeartBeatValue.quickReadUid(buf);
             Attribute<Integer> uidAttr = ctx.channel().attr(MsgServer.sUidAttr);
             Integer savedUid = uidAttr.get();
 
@@ -57,10 +56,9 @@ public class InHeartBeatHandler extends SimpleChannelInboundHandler<ByteBuf> {
             }
 
         } finally {
-            if (buf.refCnt() != 0) {
-                ReferenceCountUtil.release(buf, buf.refCnt());
-            }
+            buf.release(buf.refCnt());
         }
+
     }
 
     @Override
