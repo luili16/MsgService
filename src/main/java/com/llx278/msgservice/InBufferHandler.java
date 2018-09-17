@@ -22,12 +22,91 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
     private List<ByteBuf> mAlreadyReadBufs = new LinkedList<>();
 
     private List<ByteBuf> mTempReadBufs = new LinkedList<>();
-    private ByteBuf mReadingBuf;
-    private int mReadingLen;
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         super.channelInactive(ctx);
+    }
+
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        sLogger.log(Level.DEBUG, "channelRead");
+        ByteBuf buf = (ByteBuf) msg;
+        mTempReadBufs.add(buf);
+    }
+
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+        sLogger.log(Level.DEBUG, "channelReadComplete");
+
+        CompositeByteBuf tempReadBuf = ctx.alloc().compositeBuffer(mTempReadBufs.size());
+        tempReadBuf.addComponents(true, mTempReadBufs);
+
+        // 循环读取
+        while (true) {
+            boolean hasFound = findSyncBytes(tempReadBuf);
+            if (!hasFound) {
+                sLogger.log(Level.ERROR,"没有发现sync字节 当前收到消息的长度 : " + tempReadBuf.readableBytes());
+                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
+                ctx.read();
+                break;
+            }
+
+            // 发现了一条消息
+            int index = tempReadBuf.readableBytes();
+
+            if (index < 12) {
+                // 无法读到消息的长度,继续读
+                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
+                ctx.read();
+                break;
+            }
+
+            // 拿到消息的长度
+            int len = tempReadBuf.getInt(4) + 8;
+            // +4 是加FINISH字节
+            if (tempReadBuf.readableBytes() < len + 4) {
+                // 这条消息没有读完，接着读
+                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
+                ctx.read();
+                break;
+            }
+
+            // 接收到了一条完整的消息
+            ByteBuf readingBuf = ctx.alloc().buffer(len);
+
+            // 消耗掉SYNC字符
+            drainSync(tempReadBuf);
+
+            tempReadBuf.readBytes(readingBuf);
+            // 读出了一条消息，那么判断后来的数据是不是FINISH字节，如果是
+            // 那么就是说这条消息是有效的
+            if (isFinishBytes(tempReadBuf)) {
+                // 加入消息列表
+                mAlreadyReadBufs.add(readingBuf);
+                // 消耗掉结束字符
+                drainFinish(tempReadBuf);
+            } else {
+                // 不是结束字符，那么就意味着这条消息读取失败了
+                // 不需要消耗结束字符，继续读
+                // 这里无法保证消息是始终都能收到的，虽然理论上是可以的
+                // 出现这种情况就是网络出现了异常波动，所以需要更上层
+                // 的协议来保证消息已经准确送达了
+                sLogger.log(Level.ERROR,"读取到了一个无效的msg " + tempReadBuf);
+                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
+                break;
+            }
+            // 一条消息已经读取结束了，那么就应该继续读下一条消息了,继续循环
+        }
+
+        // 将读到的消息发送给下一个handler执行
+        if (mAlreadyReadBufs.isEmpty()) {
+            sLogger.log(Level.ERROR,"empty already read bufs");
+        }
+
+        ctx.fireChannelRead(mAlreadyReadBufs);
+        ctx.fireChannelReadComplete();
+        mAlreadyReadBufs.clear();
     }
 
     /**
@@ -68,13 +147,6 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
         return false;
     }
 
-    @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        sLogger.log(Level.DEBUG, "channelRead");
-        ByteBuf buf = (ByteBuf) msg;
-        mTempReadBufs.add(buf);
-    }
-
     private void feedLastBytesToTempReadBufs(ChannelHandlerContext ctx, ByteBuf tempReadBuf) {
         ByteBuf lastBytes = ctx.alloc().buffer();
         lastBytes.writeBytes(tempReadBuf);
@@ -95,78 +167,5 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
         tempReadBuf.readByte();
         tempReadBuf.readByte();
         tempReadBuf.readByte();
-    }
-
-    @Override
-    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
-        sLogger.log(Level.DEBUG, "channelReadComplete");
-
-        CompositeByteBuf tempReadBuf = ctx.alloc().compositeBuffer(mTempReadBufs.size());
-        tempReadBuf.addComponents(true, mTempReadBufs);
-
-        // 循环读取
-        while (true) {
-
-            boolean hasFound = findSyncBytes(tempReadBuf);
-            if (!hasFound) {
-                sLogger.log(Level.ERROR,"没有找到sync段 当前收到消息的长度 : " + tempReadBuf.readableBytes());
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                ctx.read();
-                break;
-            }
-
-            // 找到了消息段
-            if (tempReadBuf.readableBytes() < 12) {
-                // 无法读到消息的长度,继续读
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                ctx.read();
-                break;
-            }
-
-            // 拿到消息的长度
-            mReadingLen = tempReadBuf.getInt(4) + 8;
-            // +4 是加FINISH字节
-            if (tempReadBuf.readableBytes() < mReadingLen + 4) {
-                // 这条消息没有读完，接着读
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                ctx.read();
-                break;
-            }
-
-            // 接收到了一条完整的消息
-            ByteBuf readingBuf = ctx.alloc().buffer(mReadingLen);
-
-            // 消耗掉SYNC字符
-            drainSync(tempReadBuf);
-
-            tempReadBuf.readBytes(readingBuf);
-            // 读出了一条消息，那么判断后来的数据是不是FINISH字节，如果是
-            // 那么就是说这条消息是有效的
-            if (isFinishBytes(tempReadBuf)) {
-                // 加入消息列表
-                mAlreadyReadBufs.add(readingBuf);
-                // 消耗掉结束字符
-                drainFinish(tempReadBuf);
-            } else {
-                // 不是结束字符，那么就意味着这条消息读取失败了
-                // 不需要消耗结束字符，继续读
-                // 这里无法保证消息是始终都能收到的，虽然理论上是可以的
-                // 出现这种情况就是网络出现了异常波动，所以需要更上层
-                // 的协议来保证消息已经准确送达了
-                sLogger.log(Level.ERROR,"读取到了一个无效的msg " + tempReadBuf);
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                break;
-            }
-            // 一条消息已经读取结束了，那么就应该继续读下一条消息了,继续循环
-        }
-
-        // 将读到的消息发送给下一个handler执行
-        if (mAlreadyReadBufs.isEmpty()) {
-            sLogger.log(Level.ERROR,"empty already read bufs");
-        }
-
-        ctx.fireChannelRead(mAlreadyReadBufs);
-        ctx.fireChannelReadComplete();
-        mAlreadyReadBufs.clear();
     }
 }
