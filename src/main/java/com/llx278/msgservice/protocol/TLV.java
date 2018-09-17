@@ -2,13 +2,23 @@ package com.llx278.msgservice.protocol;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
-import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 public class TLV {
+
+    public static final byte SYNC_ONE_BYTE = (byte) 0xaa;
+    public static final byte[] SYNC_BYTES = new byte[]{(byte) 0xaa,(byte) 0xaa,(byte) 0xaa,(byte) 0xaa};
+    public static final byte[] FINISH_BYTES = new byte[]{(byte) 0x55,(byte) 0x55,(byte) 0x55,(byte) 0x55};
+    /**
+     * 代表一个消息的起始
+     */
+    public static final int SYNC =   0xAAAAAAAA;
+    /**
+     * 代表一个消息的结束
+     */
+    public static final int FINISH = 0x55555555;
 
     private static final Logger sLogger = LogManager.getLogger(TLV.class);
 
@@ -34,17 +44,13 @@ public class TLV {
         return value;
     }
 
-    public static void compositeTlvFrame(int type, BaseValue value, CompositeByteBuf dst, ByteBuf tl, ByteBuf v) {
-        tl.writeInt(type);
-        value.writeTo(v);
-        tl.writeInt(v.readableBytes());
-        dst.addComponents(true, tl, v);
-    }
 
     public static void compositeTlvFrame(int type, ByteBuf v, ByteBuf dst) {
         dst.writeInt(type);
         dst.writeInt(v.readableBytes());
         dst.writeBytes(v);
+        v.release(v.refCnt());
+
     }
 
     public static boolean isHeartBeatFrame(ByteBuf buf) {

@@ -33,8 +33,14 @@ public class OutTLVFrameHandler extends ChannelOutboundHandlerAdapter {
         ByteBuf buf = (ByteBuf) msg;
         ByteBuf dst = ctx.alloc().buffer();
         TLV.compositeTlvFrame(Type.FRAME_MSG, buf, dst);
-        ctx.writeAndFlush(dst);
-        buf.release();
+        ByteBuf sync = ctx.alloc().buffer();
+        ByteBuf finish = ctx.alloc().buffer();
+        sync.writeInt(TLV.SYNC);
+        finish.writeInt(TLV.FINISH);
+        ctx.write(sync);
+        ctx.write(dst);
+        ctx.write(finish);
+        ctx.flush();
     }
 
     @Override
