@@ -1,6 +1,7 @@
 package com.llx278.msgservice;
 
 import com.llx278.msgservice.protocol.TLV;
+import com.sun.jdi.ByteValue;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.channel.ChannelHandlerContext;
@@ -82,31 +83,26 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
         mTempReadBufs.add(lastBytes);
     }
 
+    private void drainSync(ByteBuf tempReadBuf) {
+        tempReadBuf.readByte();
+        tempReadBuf.readByte();
+        tempReadBuf.readByte();
+        tempReadBuf.readByte();
+    }
+
+    private void drainFinish(ByteBuf tempReadBuf) {
+        tempReadBuf.readByte();
+        tempReadBuf.readByte();
+        tempReadBuf.readByte();
+        tempReadBuf.readByte();
+    }
+
     @Override
     public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
         sLogger.log(Level.DEBUG, "channelReadComplete");
 
         CompositeByteBuf tempReadBuf = ctx.alloc().compositeBuffer(mTempReadBufs.size());
         tempReadBuf.addComponents(true, mTempReadBufs);
-
-        if (mReadingBuf != null) {
-            // 这种情况就是说上次有消息没有读完，那么继续读
-            int noReadLen = mReadingLen - mReadingBuf.readableBytes();
-            if (tempReadBuf.readableBytes() <= noReadLen) {
-                mReadingBuf.writeBytes(tempReadBuf);
-            }
-
-            if (mReadingBuf.readableBytes() == mReadingLen) {
-                // 读完了一条消息
-                sLogger.log(Level.DEBUG,"读完了一条消息");
-                //
-                mAlreadyReadBufs.add(mReadingBuf);
-
-            }
-
-        }
-
-
 
         // 循环读取
         while (true) {
@@ -127,54 +123,48 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
                 break;
             }
 
-            // 消耗掉sync字节
-            tempReadBuf.readByte();
-            tempReadBuf.readByte();
-            tempReadBuf.readByte();
-            tempReadBuf.readByte();
-
             // 拿到消息的长度
             mReadingLen = tempReadBuf.getInt(4) + 8;
-            mReadingBuf = ctx.alloc().buffer(mReadingLen);
-
-            if (tempReadBuf.readableBytes() > mReadingLen + 4) {
-                // 可以读了
+            // +4 是加FINISH字节
+            if (tempReadBuf.readableBytes() < mReadingLen + 4) {
+                // 这条消息没有读完，接着读
+                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
+                ctx.read();
+                break;
             }
 
-            tempReadBuf.readBytes(mReadingBuf);
-            if (mReadingBuf.readableBytes() == mReadingLen) {
-                if (tempReadBuf.readableBytes() < 4) {
-                    // 这种情况需要继续读
-                    feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                    ctx.read();
-                    break;
-                } else {
-                    // 判断后面跟的4个字节是不是结束字节
-                    if (isFinishBytes(tempReadBuf)) {
-                        // 是四个字节的结束，那么就意味着读取到了一个新的msg
-                        mAlreadyReadBufs.add(mReadingBuf);
-                        mReadingBuf = null;
-                        // 消耗掉结束字节
-                        tempReadBuf.readByte();
-                        tempReadBuf.readByte();
-                        tempReadBuf.readByte();
-                        tempReadBuf.readByte();
-                        // 继续尝试读下一条消息
-                    }
-                }
+            // 接收到了一条完整的消息
+            ByteBuf readingBuf = ctx.alloc().buffer(mReadingLen);
+
+            // 消耗掉SYNC字符
+            drainSync(tempReadBuf);
+
+            tempReadBuf.readBytes(readingBuf);
+            // 读出了一条消息，那么判断后来的数据是不是FINISH字节，如果是
+            // 那么就是说这条消息是有效的
+            if (isFinishBytes(tempReadBuf)) {
+                // 加入消息列表
+                mAlreadyReadBufs.add(readingBuf);
+                // 消耗掉结束字符
+                drainFinish(tempReadBuf);
             } else {
-                // 这种情况就是说这个消息在一次读取中没有完成，那么下次就应该接着读了
-                // 清除上次读取的数据
-                tempReadBuf.release();
-                mTempReadBufs.clear();
+                // 不是结束字符，那么就意味着这条消息读取失败了
+                // 不需要消耗结束字符，继续读
+                // 这里无法保证消息是始终都能收到的，虽然理论上是可以的
+                // 出现这种情况就是网络出现了异常波动，所以需要更上层
+                // 的协议来保证消息已经准确送达了
+                sLogger.log(Level.ERROR,"读取到了一个无效的msg " + tempReadBuf);
+                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
+                break;
             }
+            // 一条消息已经读取结束了，那么就应该继续读下一条消息了,继续循环
         }
 
-        // 讲读到的消息发送给下一个handler执行
+        // 将读到的消息发送给下一个handler执行
         if (mAlreadyReadBufs.isEmpty()) {
             sLogger.log(Level.ERROR,"empty already read bufs");
-            return;
         }
+
         ctx.fireChannelRead(mAlreadyReadBufs);
         ctx.fireChannelReadComplete();
         mAlreadyReadBufs.clear();
