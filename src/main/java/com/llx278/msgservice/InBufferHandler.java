@@ -62,10 +62,18 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
                 break;
             }
 
-            // 拿到消息的长度
-            int len = tempReadBuf.getInt(4) + 8;
-            // +4 是加FINISH字节
-            if (tempReadBuf.readableBytes() < len + 4) {
+            // 拿到消息的长度,这个长度是整个tlv帧的长度
+            int len = tempReadBuf.getInt(8) + 8;
+
+            if (len > TLV.MAX_LENGTH) {
+                sLogger.log(Level.ERROR,"收到了一条无效的消息 当前消息的长度 : " + len);
+                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
+                ctx.read();
+                break;
+            }
+
+            // +8 为包含了sync字节和FINISH字节
+            if (tempReadBuf.readableBytes() < len + 8) {
                 // 这条消息没有读完，接着读
                 feedLastBytesToTempReadBufs(ctx,tempReadBuf);
                 ctx.read();
@@ -90,7 +98,7 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
                 // 不是结束字符，那么就意味着这条消息读取失败了
                 // 不需要消耗结束字符，继续读
                 // 这里无法保证消息是始终都能收到的，虽然理论上是可以的
-                // 出现这种情况就是网络出现了异常波动，所以需要更上层
+                // 出现这种情况可能是网络出现了异常波动，所以需要更上层
                 // 的协议来保证消息已经准确送达了
                 sLogger.log(Level.ERROR,"读取到了一个无效的msg " + tempReadBuf);
                 feedLastBytesToTempReadBufs(ctx,tempReadBuf);
@@ -148,11 +156,11 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
     }
 
     private void feedLastBytesToTempReadBufs(ChannelHandlerContext ctx, ByteBuf tempReadBuf) {
-        ByteBuf lastBytes = ctx.alloc().buffer();
+        /*ByteBuf lastBytes = ctx.alloc().buffer();
         lastBytes.writeBytes(tempReadBuf);
-        tempReadBuf.release();
+        tempReadBuf.release();*/
         mTempReadBufs.clear();
-        mTempReadBufs.add(lastBytes);
+        mTempReadBufs.add(tempReadBuf);
     }
 
     private void drainSync(ByteBuf tempReadBuf) {
