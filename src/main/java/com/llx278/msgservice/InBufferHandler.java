@@ -42,42 +42,26 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
         CompositeByteBuf tempReadBuf = ctx.alloc().compositeBuffer(mTempReadBufs.size());
         tempReadBuf.addComponents(true, mTempReadBufs);
 
-        // 循环读取
-        while (true) {
-            boolean hasFound = findSyncBytes(tempReadBuf);
-            if (!hasFound) {
-                sLogger.log(Level.ERROR,"没有发现sync字节 当前收到消息的长度 : " + tempReadBuf.readableBytes());
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                ctx.read();
-                break;
-            }
+        while (findSyncBytes(tempReadBuf)) {
 
             // 发现了一条消息
             int index = tempReadBuf.readableBytes();
-
             if (index < 12) {
                 // 无法读到消息的长度,继续读
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                ctx.read();
                 break;
             }
 
             // 拿到消息的长度
-            int len = tempReadBuf.getInt(4) + 8;
-            // +4 是加FINISH字节
+            int len = tempReadBuf.getInt(8) + 8;
             if (tempReadBuf.readableBytes() < len + 4) {
-                // 这条消息没有读完，接着读
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                ctx.read();
+                // 这条消息没有读完，继续读
                 break;
             }
 
             // 接收到了一条完整的消息
             ByteBuf readingBuf = ctx.alloc().buffer(len);
-
             // 消耗掉SYNC字符
             drainSync(tempReadBuf);
-
             tempReadBuf.readBytes(readingBuf);
             // 读出了一条消息，那么判断后来的数据是不是FINISH字节，如果是
             // 那么就是说这条消息是有效的
@@ -93,26 +77,33 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
                 // 出现这种情况就是网络出现了异常波动，所以需要更上层
                 // 的协议来保证消息已经准确送达了
                 sLogger.log(Level.ERROR,"读取到了一个无效的msg " + tempReadBuf);
-                feedLastBytesToTempReadBufs(ctx,tempReadBuf);
-                break;
             }
-            // 一条消息已经读取结束了，那么就应该继续读下一条消息了,继续循环
         }
+
+        // 没有找到，继续读
+        if (tempReadBuf.readableBytes() != 0) {
+            sLogger.log(Level.DEBUG,"发现一条未完全读完的消息 长度是 : " + tempReadBuf.readableBytes());
+        }
+
+        feedLastBytesToTempReadBufs(ctx,tempReadBuf);
 
         // 将读到的消息发送给下一个handler执行
         if (mAlreadyReadBufs.isEmpty()) {
-            sLogger.log(Level.ERROR,"empty already read bufs");
+            sLogger.log(Level.ERROR,"already read bufs is empty");
         }
 
-        ctx.fireChannelRead(mAlreadyReadBufs);
-        ctx.fireChannelReadComplete();
+        for (ByteBuf buf : mAlreadyReadBufs) {
+            ctx.fireChannelRead(buf);
+            ctx.fireChannelReadComplete();
+        }
+
         mAlreadyReadBufs.clear();
     }
 
     /**
      * 找到一条消息的起始同步字节，在cubf中找到了同步的字节
      *
-     * @param cbuf
+     * @param cbuf cubf
      * @return true 找到了同步的字节，cbuf为包含同步字节的数据 false 没有找到 cbuf为无法判断的字节
      */
     private boolean findSyncBytes(ByteBuf cbuf) {
@@ -148,11 +139,11 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
     }
 
     private void feedLastBytesToTempReadBufs(ChannelHandlerContext ctx, ByteBuf tempReadBuf) {
-        ByteBuf lastBytes = ctx.alloc().buffer();
-        lastBytes.writeBytes(tempReadBuf);
-        tempReadBuf.release();
+
         mTempReadBufs.clear();
-        mTempReadBufs.add(lastBytes);
+        if (tempReadBuf.readableBytes() != 0) {
+            mTempReadBufs.add(tempReadBuf);
+        }
     }
 
     private void drainSync(ByteBuf tempReadBuf) {
