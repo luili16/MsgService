@@ -74,7 +74,7 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
                 // 不是结束字符，那么就意味着这条消息读取失败了
                 // 不需要消耗结束字符，继续读
                 // 这里无法保证消息是始终都能收到的，虽然理论上是可以的
-                // 出现这种情况就是网络出现了异常波动，所以需要更上层
+                // 出现这种情况可能是网络出现了异常波动，所以需要更上层
                 // 的协议来保证消息已经准确送达了
                 sLogger.log(Level.ERROR,"读取到了一个无效的msg " + tempReadBuf);
             }
@@ -139,7 +139,6 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
     }
 
     private void feedLastBytesToTempReadBufs(ChannelHandlerContext ctx, ByteBuf tempReadBuf) {
-
         mTempReadBufs.clear();
         if (tempReadBuf.readableBytes() != 0) {
             mTempReadBufs.add(tempReadBuf);

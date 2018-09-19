@@ -8,6 +8,11 @@ import org.apache.logging.log4j.Logger;
 
 public class TLV {
 
+    /**
+     * 一条消息最大的长度
+     */
+    public static final int MAX_LENGTH = 1024 * 1024;
+
     public static final byte SYNC_ONE_BYTE = (byte) 0xaa;
     public static final byte[] SYNC_BYTES = new byte[]{(byte) 0xaa,(byte) 0xaa,(byte) 0xaa,(byte) 0xaa};
     public static final byte[] FINISH_BYTES = new byte[]{(byte) 0x55,(byte) 0x55,(byte) 0x55,(byte) 0x55};

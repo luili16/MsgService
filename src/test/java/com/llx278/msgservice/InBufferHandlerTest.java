@@ -9,8 +9,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import java.util.LinkedList;
-
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(JUnit4.class)
@@ -26,17 +25,12 @@ public class InBufferHandlerTest {
         buf.writeInt(1234);
         buf.writeBytes(TLV.FINISH_BYTES);
 
-
-        System.out.println("buf is : " + buf.readableBytes());
         EmbeddedChannel channel = new EmbeddedChannel(new InBufferHandler());
         assertTrue(channel.writeInbound(buf));
         assertTrue(channel.finish());
 
         ByteBuf o = channel.readInbound();
-        System.out.println("o is : " + o.getInt(8));
-        ByteBuf o1 = channel.readInbound();
-        System.out.println("o is : " + o1.getInt(8));
-
+        assertEquals(1234,o.getInt(8));
     }
 
 }
