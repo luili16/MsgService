@@ -1,11 +1,11 @@
 package com.llx278.msgservice;
 
 import com.llx278.msgservice.protocol.TLV;
-import com.sun.jdi.ByteValue;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.util.Attribute;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -41,6 +41,14 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
 
         CompositeByteBuf tempReadBuf = ctx.alloc().compositeBuffer(mTempReadBufs.size());
         tempReadBuf.addComponents(true, mTempReadBufs);
+
+        if (tempReadBuf.readableBytes() == 0) {
+            Attribute<Integer> attr = ctx.channel().attr(MsgServer.sUidAttr);
+            Integer uid = attr.get();
+            sLogger.log(Level.ERROR,"------ eof ----- 关闭uid为 : " + uid + "的客户端连接");
+            Helper.removeClient(ctx);
+            return;
+        }
 
         while (findSyncBytes(tempReadBuf)) {
 
