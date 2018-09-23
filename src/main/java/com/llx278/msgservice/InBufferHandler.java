@@ -47,6 +47,7 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
             Integer uid = attr.get();
             sLogger.log(Level.ERROR,"------ eof ----- 关闭uid为 : " + uid + "的客户端连接");
             Helper.removeClient(ctx);
+            tempReadBuf.release();
             return;
         }
 
@@ -86,11 +87,6 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
                 // 的协议来保证消息已经准确送达了
                 sLogger.log(Level.ERROR,"读取到了一个无效的msg " + tempReadBuf);
             }
-        }
-
-        // 没有找到，继续读
-        if (tempReadBuf.readableBytes() != 0) {
-            sLogger.log(Level.DEBUG,"发现一条未完全读完的消息 长度是 : " + tempReadBuf.readableBytes());
         }
 
         feedLastBytesToTempReadBufs(ctx,tempReadBuf);
@@ -147,9 +143,20 @@ public class InBufferHandler extends ChannelInboundHandlerAdapter {
     }
 
     private void feedLastBytesToTempReadBufs(ChannelHandlerContext ctx, ByteBuf tempReadBuf) {
-        mTempReadBufs.clear();
-        if (tempReadBuf.readableBytes() != 0) {
-            mTempReadBufs.add(tempReadBuf);
+
+        if (tempReadBuf.readableBytes() == 0) {
+            sLogger.log(Level.DEBUG,"tempReadBuf refcnt : " + tempReadBuf.refCnt());
+            if (tempReadBuf.refCnt() != 0) {
+                tempReadBuf.release();
+            }
+            mTempReadBufs.clear();
+        } else {
+
+            ByteBuf buf = ctx.alloc().buffer();
+            buf.writeBytes(tempReadBuf);
+            tempReadBuf.release();
+            mTempReadBufs.clear();
+            mTempReadBufs.add(buf);
         }
     }
 

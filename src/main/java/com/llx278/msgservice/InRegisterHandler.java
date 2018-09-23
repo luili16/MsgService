@@ -61,7 +61,9 @@ public class InRegisterHandler extends ChannelInboundHandlerAdapter {
             uidAttr.set(uid);
 
         } finally {
+            sLogger.log(Level.DEBUG,"buf count : before" + buf.refCnt());
             buf.release(buf.refCnt());
+            sLogger.log(Level.DEBUG,"buf count : after" + buf.refCnt());
         }
     }
 
